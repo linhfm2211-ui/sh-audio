@@ -1,0 +1,59 @@
+name: Crawler
+
+on:
+  workflow_dispatch:
+    inputs:
+      playlist_url:
+        description: "YouTube playlist URL to import. Leave empty to only check links."
+        required: false
+        type: string
+      story_slug:
+        description: "Story slug for dead-link check. Leave empty to check all available chapters."
+        required: false
+        type: string
+      dry_run:
+        description: "Print output without writing to Supabase."
+        required: true
+        default: true
+        type: boolean
+  schedule:
+    - cron: "0 20 * * *"
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install crawler dependencies
+        run: python -m pip install -r crawler/requirements.txt
+
+      - name: Import playlist metadata
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.playlist_url != '' }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            python crawler/crawl_playlist.py "${{ inputs.playlist_url }}" --dry-run --limit 5
+          else
+            python crawler/crawl_playlist.py "${{ inputs.playlist_url }}"
+          fi
+
+      - name: Check dead links
+        if: ${{ github.event_name == 'schedule' || inputs.playlist_url == '' }}
+        run: |
+          ARGS=""
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.story_slug }}" != "" ]; then
+            ARGS="$ARGS --story-slug ${{ inputs.story_slug }}"
+          fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          python crawler/check_dead_links.py $ARGS
